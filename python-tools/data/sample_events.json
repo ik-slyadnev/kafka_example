@@ -1,0 +1,42 @@
+[
+  {
+    "event_id": "e1001",
+    "user_id": 42,
+    "event_type": "purchase",
+    "timestamp": 1715012345678,
+    "product_id": "prod-123",
+    "quantity": 2,
+    "price": 19.99,
+    "is_successful": true
+  },
+  {
+    "event_id": "e1002",
+    "user_id": 43,
+    "event_type": "view",
+    "timestamp": 1715012346789,
+    "product_id": "prod-456",
+    "quantity": null,
+    "price": null,
+    "is_successful": true
+  },
+  {
+    "event_id": "e1003",
+    "user_id": 42,
+    "event_type": "add_to_cart",
+    "timestamp": 1715012347890,
+    "product_id": "prod-789",
+    "quantity": 1,
+    "price": 29.99,
+    "is_successful": true
+  },
+  {
+    "event_id": "e1004",
+    "user_id": 44,
+    "event_type": "checkout",
+    "timestamp": 1715012348901,
+    "product_id": null,
+    "quantity": null,
+    "price": 49.98,
+    "is_successful": false
+  }
+]

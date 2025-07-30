@@ -1,0 +1,15 @@
+{
+  "type": "record",
+  "name": "UserEvent",
+  "namespace": "com.example",
+  "fields": [
+    {"name": "event_id", "type": "string"},
+    {"name": "user_id", "type": "int"},
+    {"name": "event_type", "type": "string"},
+    {"name": "timestamp", "type": "long"},
+    {"name": "product_id", "type": ["null", "string"], "default": null},
+    {"name": "quantity", "type": ["null", "int"], "default": null},
+    {"name": "price", "type": ["null", "double"], "default": null},
+    {"name": "is_successful", "type": "boolean"}
+  ]
+}
