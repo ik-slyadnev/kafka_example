@@ -55,19 +55,23 @@ def send_test_messages(topic, count=10):
 
 def test_offset_recovery(topic, group_id, specific_offset=None):
     """Тестирование восстановления с определенного смещения"""
-    consumer = create_consumer(topic, group_id)
-    
-    if specific_offset is not None:
-        # Получение списка партиций топика
-        partitions = consumer.partitions_for_topic(topic)
-        if partitions:
-            # Установка указанного смещения для всех партиций
-            for partition in partitions:
-                tp = TopicPartition(topic, partition)
-                consumer.assign([tp])
-                consumer.seek(tp, specific_offset)
-    
-    logger.info(f"Начало чтения с{'указанного смещения ' + str(specific_offset) if specific_offset else ' начала'}")
+    if specific_offset is None:
+        consumer = create_consumer(topic, group_id)
+    else:
+        # Для чтения с конкретного смещения назначаем партиции вручную (без подписки на топик)
+        consumer = KafkaConsumer(
+            bootstrap_servers=['kafka:9092'],
+            group_id=group_id,
+            enable_auto_commit=True,
+            value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+        )
+        tps = [TopicPartition(topic, p) for p in sorted(consumer.partitions_for_topic(topic) or [])]
+        consumer.assign(tps)
+        for tp in tps:
+            consumer.seek(tp, specific_offset)
+
+    where = f"смещения {specific_offset}" if specific_offset is not None else "начала"
+    logger.info(f"Начало чтения с {where}. Для остановки нажми Ctrl+C")
     
     try:
         for message in consumer:

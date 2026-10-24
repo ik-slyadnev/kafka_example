@@ -28,9 +28,9 @@ def create_producer():
         logger.error(f"Ошибка при создании Kafka Producer: {e}")
         raise
 
-def send_message(producer, topic, message, key=None):
+def send_message(producer, topic, message, key=None, partition=None):
     try:
-        future = producer.send(topic, value=message, key=key.encode('utf-8') if key else None)
+        future = producer.send(topic, value=message, key=key.encode('utf-8') if key else None, partition=partition)
         record_metadata = future.get(timeout=10)
         logger.info(f"Сообщение отправлено в топик {topic}, партиция {record_metadata.partition}, смещение {record_metadata.offset}")
         return record_metadata
@@ -42,7 +42,7 @@ def main():
     parser = argparse.ArgumentParser(description='Kafka Producer Tool')
     parser.add_argument('--topic', required=True, help='Имя топика Kafka')
     parser.add_argument('--key', help='Ключ сообщения (опционально)')
-    parser.add_argument('--count', type=int, default=10, help='Количество сообщений')
+    parser.add_argument('--count', type=int, default=1, help='Количество сообщений (по умолчанию 1)')
     parser.add_argument('--interval', type=float, default=1.0, help='Интервал между сообщениями в секундах')
     parser.add_argument('--message', help='Произвольное сообщение в формате JSON (опционально)')
     args = parser.parse_args()
@@ -70,9 +70,13 @@ def main():
                     "message": f"Тестовое сообщение {i}",
                     "timestamp": time.time()
                 }
-            # Если ключ не задан, используем id % 3
-            msg_key = key if key is not None else str(i % 3)
-            send_message(producer, topic_name, message, msg_key)
+            if key is not None:
+                # С ключом партицию выбирает Kafka: одинаковый ключ всегда попадает в одну партицию
+                send_message(producer, topic_name, message, key)
+            else:
+                # Без ключа раскладываем сообщения по партициям по кругу: 0, 1, 2, 0, 1, 2...
+                partitions = sorted(producer.partitions_for(topic_name) or [0])
+                send_message(producer, topic_name, message, partition=partitions[i % len(partitions)])
             time.sleep(interval)
     finally:
         producer.flush()

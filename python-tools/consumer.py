@@ -29,6 +29,7 @@ def create_consumer(topic, group_id=None, from_beginning=False):
         auto_offset_reset=auto_offset_reset,
         enable_auto_commit=True,
         group_id=group_id,
+        consumer_timeout_ms=1000,  # раз в секунду выходим из ожидания, чтобы Ctrl+C срабатывал сразу
         value_deserializer=lambda x: json.loads(x.decode('utf-8')),
         key_deserializer=lambda x: x.decode('utf-8') if x else None
     )
@@ -66,16 +67,18 @@ def main():
     
     try:
         message_count = 0
-        for message in consumer:
-            if not running:
-                break
-            
-            print_message(message)
-            message_count += 1
-            
-            if args.limit and message_count >= args.limit:
-                print(f"Достигнут лимит сообщений ({args.limit}). Завершение работы.")
-                break
+        limit_reached = False
+        while running and not limit_reached:
+            for message in consumer:
+                print_message(message)
+                message_count += 1
+
+                if args.limit and message_count >= args.limit:
+                    print(f"Достигнут лимит сообщений ({args.limit}). Завершение работы.")
+                    limit_reached = True
+                    break
+                if not running:
+                    break
     finally:
         consumer.close()
         print("Консьюмер закрыт.")

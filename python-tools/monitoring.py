@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from kafka import KafkaAdminClient, KafkaConsumer
+from kafka import KafkaAdminClient, KafkaConsumer, TopicPartition
 from kafka.admin import ConfigResource, ConfigResourceType
 import json
 import time
@@ -53,21 +53,37 @@ class KafkaMonitor:
         return metrics
         
     def get_consumer_group_metrics(self, group_id):
-        """Получение метрик группы потребителей"""
-        consumer = KafkaConsumer(
-            bootstrap_servers=self.bootstrap_servers,
-            group_id=group_id
-        )
-        
-        metrics = {
-            "members": len(consumer.metrics()['consumer-coordinator-metrics']),
-            "topics": consumer.subscription(),
-            "assignments": consumer.assignment()
+        """Метрики группы потребителей: состояние, участники, смещения и отставание (lag)"""
+        info = self.admin_client.describe_consumer_groups([group_id])[0]
+        members = []
+        for m in info.members:
+            assigned = []
+            if m.member_assignment:
+                for topic, partitions in m.member_assignment.assignment:
+                    assigned += [f"{topic}-{p}" for p in partitions]
+            members.append({"client_id": m.client_id, "host": m.client_host, "partitions": assigned})
+
+        committed = self.admin_client.list_consumer_group_offsets(group_id)
+        offsets = {}
+        if committed:
+            consumer = KafkaConsumer(bootstrap_servers=self.bootstrap_servers)
+            end_offsets = consumer.end_offsets(list(committed.keys()))
+            consumer.close()
+            for tp, meta in sorted(committed.items()):
+                offsets[f"{tp.topic}-{tp.partition}"] = {
+                    "committed_offset": meta.offset,
+                    "end_offset": end_offsets[tp],
+                    "lag": end_offsets[tp] - meta.offset,
+                }
+
+        return {
+            "state": info.state,
+            "members_count": len(members),
+            "members": members,
+            "offsets": offsets,
+            "total_lag": sum(o["lag"] for o in offsets.values()),
         }
-        
-        consumer.close()
-        return metrics
-        
+
     def collect_all_metrics(self, topic=None, group_id=None):
         """Сбор всех доступных метрик"""
         metrics = {
@@ -117,7 +133,8 @@ def main():
     try:
         while True:
             metrics = monitor.collect_all_metrics(args.topic, args.group)
-            logger.info(f"Собранные метрики: {json.dumps(metrics, indent=2)}")
+            print(json.dumps(metrics, indent=2, ensure_ascii=False, default=str))
+            print(f"Следующий сбор через {args.interval} сек. Для остановки нажми Ctrl+C")
             time.sleep(args.interval)
     except KeyboardInterrupt:
         logger.info("Мониторинг остановлен пользователем")

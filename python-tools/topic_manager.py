@@ -11,7 +11,7 @@
 import argparse
 import json
 from kafka import KafkaAdminClient
-from kafka.admin import NewTopic
+from kafka.admin import NewTopic, ConfigResource, ConfigResourceType
 from kafka.errors import TopicAlreadyExistsError, UnknownTopicOrPartitionError
 
 def create_admin_client():
@@ -49,15 +49,15 @@ def describe_topic(admin_client, topic_name):
         print(json.dumps(topic_metadata, indent=2, default=str))
         
         # Получаем конфигурацию топика
-        configs = admin_client.describe_configs(
-            config_resources=[
-                (2, topic_name)  # 2 - это RESOURCE_TYPE_TOPIC
-            ]
+        responses = admin_client.describe_configs(
+            config_resources=[ConfigResource(ConfigResourceType.TOPIC, topic_name)]
         )
         print("\nКонфигурация топика:")
-        for resource, config_entries in configs.items():
-            for config_name, config_value in config_entries.items():
-                print(f"  {config_name}: {config_value}")
+        for response in responses:
+            for resource in response.resources:
+                # resource: (error_code, error_message, resource_type, resource_name, config_entries)
+                for entry in resource[4]:
+                    print(f"  {entry[0]}: {entry[1]}")
     except UnknownTopicOrPartitionError:
         print(f"Топик '{topic_name}' не существует")
 
