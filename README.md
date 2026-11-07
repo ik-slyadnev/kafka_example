@@ -1,6 +1,11 @@
-# Kafka Тренажер для Manual QA
+# Apache Kafka для QA: тренажёр с Python и Docker Compose
 
-Этот проект представляет собой локальный тренажер для отработки навыков работы с Apache Kafka для специалистов по ручному тестированию (Manual QA). Тренажер позволяет изучить основные концепции Kafka и отработать различные сценарии работы с этой технологией.
+Локальный тренажёр Apache Kafka для ручного тестирования: топики, партиции, группы потребителей, Avro и Schema Registry, ребалансировка и восстановление после перезапуска брокера
+Стенд запускается через Docker Compose; сообщения и состояние брокера можно смотреть в Kafka UI или через Python CLI
+
+Local Apache Kafka training lab for manual QA: topics, partitions, consumer groups, Avro, Schema Registry and recovery scenarios. Includes Kafka UI, Python CLI tools and integration tests.
+
+[Быстрый запуск](#установка-и-запуск) · [Сценарии](#тестовые-сценарии) · [Практика](#задания-для-практики) · [Проверки](#проверка-исправлений)
 
 ## Содержание
 
@@ -252,3 +257,8 @@ docker exec -it python-tools python test_recovery.py --topic my-topic --group re
 Остановите непрерывное чтение сочетанием Ctrl+C
 Сценарии `consumer_groups` и `rebalancing` печатают команды для ручной работы в нескольких терминалах.
 Генератор Avro поддерживает string, int, long, float, double, boolean, null и их union; для вложенных схем передавайте готовые данные через `--data`.
+
+
+## Другие проекты
+
+[RabbitMQ для QA](https://github.com/ik-slyadnev/rabbit_mq_example): тренажёр очередей и обменников с Flask REST API, сохранением истории сообщений и восстановлением потребителей
