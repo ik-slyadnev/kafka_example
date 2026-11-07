@@ -81,6 +81,8 @@ def main():
     parser.add_argument('--replication', type=int, default=1, help='Фактор репликации (для --create)')
     
     args = parser.parse_args()
+    if args.partitions <= 0 or args.replication <= 0:
+        parser.error("--partitions и --replication должны быть больше нуля")
     
     admin_client = create_admin_client()
     

@@ -15,7 +15,9 @@
 
 Для работы с тренажером вам понадобится:
 
-- Docker и Docker Compose
+- Git
+- Docker и Docker Compose с поддержкой `docker compose up --wait`
+- Python 3 на компьютере для проверки перезапуска брокера; остальные Python-скрипты работают в контейнере
 - Базовые знания работы с терминалом
 - Базовое понимание концепций Kafka
 
@@ -23,18 +25,18 @@
 
 1. Клонируйте репозиторий:
    ```
-   git clone <url-репозитория>
-   cd kafka-qa-trainer
+   git clone https://github.com/ik-slyadnev/kafka_example.git
+   cd kafka_example
    ```
 
 2. Запустите контейнеры с помощью Docker Compose:
    ```
-   docker-compose up -d
+   docker compose up -d --build --wait
    ```
 
 3. Проверьте, что все контейнеры запущены:
    ```
-   docker-compose ps
+   docker compose ps
    ```
 
 4. Откройте Kafka UI в браузере:
@@ -71,7 +73,7 @@ docker exec -it python-tools python topic_manager.py --list
 docker exec -it python-tools python topic_manager.py --describe my-topic
 ```
 
-Удаление топика:
+Удаление топика после завершения отправки и чтения сообщений:
 ```
 docker exec -it python-tools python topic_manager.py --delete my-topic
 ```
@@ -85,19 +87,20 @@ docker exec -it python-tools python producer.py --topic my-topic --message "Те
 
 Чтение сообщений:
 ```
-docker exec -it python-tools python consumer.py --topic my-topic --from-beginning
+docker exec -it python-tools python consumer.py --topic my-topic --from-beginning --limit 5
 ```
 
 ### Работа с Avro и Schema Registry
 
 Отправка сообщений с использованием Avro:
 ```
+docker exec -it python-tools python topic_manager.py --create avro-topic
 docker exec -it python-tools python avro_producer.py --topic avro-topic --schema schemas/user_event.avsc --data data/sample_events.json
 ```
 
 Чтение сообщений в формате Avro:
 ```
-docker exec -it python-tools python avro_consumer.py --topic avro-topic --from-beginning
+docker exec -it python-tools python avro_consumer.py --topic avro-topic --group avro-example-first --from-beginning --limit 4
 ```
 
 ## Тестовые сценарии
@@ -175,12 +178,12 @@ docker exec -it python-tools python avro_consumer.py --topic avro-topic --from-b
 
 1. Убедитесь, что все контейнеры запущены:
    ```
-   docker-compose ps
+   docker compose ps
    ```
 
 2. Проверьте логи Kafka:
    ```
-   docker-compose logs kafka
+   docker compose logs kafka
    ```
 
 3. Проверьте доступность порта 9092:
@@ -194,7 +197,7 @@ docker exec -it python-tools python avro_consumer.py --topic avro-topic --from-b
 
 1. Проверьте логи Schema Registry:
    ```
-   docker-compose logs schema-registry
+   docker compose logs schema-registry
    ```
 
 2. Убедитесь, что Schema Registry доступен:
@@ -206,10 +209,46 @@ docker exec -it python-tools python avro_consumer.py --topic avro-topic --from-b
 
 Для остановки всех контейнеров выполните:
 ```
-docker-compose down
+docker compose down
 ```
+
+Данные Kafka и ZooKeeper хранятся в именованных томах и сохраняются после `docker compose down`.
 
 Для полной очистки (включая удаление данных):
 ```
-docker-compose down -v
+docker compose down -v
 ```
+
+## Проверка исправлений
+
+После запуска стенда выполните из корня репозитория; проверка перезапуска остановит и снова запустит брокер Kafka:
+
+```bash
+docker exec python-tools python -m unittest discover -s tests -v
+docker exec python-tools python tests/smoke.py
+docker exec python-tools python tests/assignments.py
+python3 tests/restart_broker.py
+```
+
+Проверки создают временные топики и удаляют их после завершения.
+`assignments.py` выполняет все шесть готовых сценариев и практические задания 1–3, включая команды, напечатанные для ручного запуска.
+`restart_broker.py` проверяет задание 4: останавливает Kafka, запускает снова и проверяет сохранность десяти сообщений.
+
+Для клиентов на компьютере используйте `localhost:9092`, внутри Docker-сети `kafka:9092`.
+Порты стенда доступны только на локальном компьютере
+Топики нужно создавать явно: автоматическое создание отключено
+Примеры команд управления топиками можно выполнять по отдельности; удаляйте топик только после работы с ним
+
+`producer.py --message` принимает JSON или обычный текст, в том числе пустую строку.
+`--from-beginning` выбирает начало только при отсутствии сохранённого смещения группы
+Обычный `consumer.py` без `--group` не сохраняет позицию чтения между запусками
+Для повторного чтения Avro используйте новую группу: у существующей группы сохраняется позиция чтения
+Для повторного чтения JSON с нулевого смещения выполните:
+
+```bash
+docker exec -it python-tools python test_recovery.py --topic my-topic --group replay-example --mode recover --offset 0
+```
+
+Остановите непрерывное чтение сочетанием Ctrl+C
+Сценарии `consumer_groups` и `rebalancing` печатают команды для ручной работы в нескольких терминалах.
+Генератор Avro поддерживает string, int, long, float, double, boolean, null и их union; для вложенных схем передавайте готовые данные через `--data`.

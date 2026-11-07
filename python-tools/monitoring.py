@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from kafka import KafkaAdminClient, KafkaConsumer, TopicPartition
-from kafka.admin import ConfigResource, ConfigResourceType
+from contextlib import closing
 import json
 import time
 import logging
@@ -29,28 +29,29 @@ class KafkaMonitor:
             "total_messages": 0
         }
         
-        # Получение информации о партициях
-        partitions = consumer.partitions_for_topic(topic)
-        if not partitions:
-            logger.warning(f"Топик {topic} не найден")
+        with closing(consumer):
+            # Получение информации о партициях
+            partitions = consumer.partitions_for_topic(topic)
+            if not partitions:
+                logger.warning(f"Топик {topic} не найден")
+                return metrics
+
+            for partition in partitions:
+                tp = TopicPartition(topic, partition)
+                # Получение начального и конечного смещения
+                beginning_offset = consumer.beginning_offsets([tp])[tp]
+                end_offset = consumer.end_offsets([tp])[tp]
+
+                messages_count = end_offset - beginning_offset
+                metrics["partitions"][partition] = {
+                    "beginning_offset": beginning_offset,
+                    "end_offset": end_offset,
+                    "messages": messages_count
+                }
+                metrics["total_messages"] += messages_count
+
             return metrics
             
-        for partition in partitions:
-            tp = TopicPartition(topic, partition)
-            # Получение начального и конечного смещения
-            beginning_offset = consumer.beginning_offsets([tp])[tp]
-            end_offset = consumer.end_offsets([tp])[tp]
-            
-            messages_count = end_offset - beginning_offset
-            metrics["partitions"][partition] = {
-                "beginning_offset": beginning_offset,
-                "end_offset": end_offset,
-                "messages": messages_count
-            }
-            metrics["total_messages"] += messages_count
-            
-        consumer.close()
-        return metrics
         
     def get_consumer_group_metrics(self, group_id):
         """Метрики группы потребителей: состояние, участники, смещения и отставание (lag)"""
@@ -64,11 +65,13 @@ class KafkaMonitor:
             members.append({"client_id": m.client_id, "host": m.client_host, "partitions": assigned})
 
         committed = self.admin_client.list_consumer_group_offsets(group_id)
+        existing_topics = set(self.admin_client.list_topics())
+        committed = {tp: meta for tp, meta in committed.items()
+                     if tp.topic in existing_topics and meta.offset >= 0}
         offsets = {}
         if committed:
-            consumer = KafkaConsumer(bootstrap_servers=self.bootstrap_servers)
-            end_offsets = consumer.end_offsets(list(committed.keys()))
-            consumer.close()
+            with closing(KafkaConsumer(bootstrap_servers=self.bootstrap_servers)) as consumer:
+                end_offsets = consumer.end_offsets(list(committed.keys()))
             for tp, meta in sorted(committed.items()):
                 offsets[f"{tp.topic}-{tp.partition}"] = {
                     "committed_offset": meta.offset,
@@ -105,7 +108,8 @@ class KafkaMonitor:
         if group_id:
             groups = [group_id]
         else:
-            groups = self.admin_client.list_consumer_groups()
+            groups = [group_id for group_id, protocol in self.admin_client.list_consumer_groups()
+                      if protocol in ("consumer", "")]
             
         for g in groups:
             metrics["consumer_groups"][g] = self.get_consumer_group_metrics(g)
@@ -120,6 +124,8 @@ def main():
                        help='Интервал сбора метрик в секундах')
     
     args = parser.parse_args()
+    if args.interval <= 0:
+        parser.error("--interval должен быть больше нуля")
     
     def signal_handler(signum, frame):
         logger.info("Получен сигнал остановки, завершение работы...")
@@ -138,6 +144,8 @@ def main():
             time.sleep(args.interval)
     except KeyboardInterrupt:
         logger.info("Мониторинг остановлен пользователем")
+    finally:
+        monitor.admin_client.close()
 
 if __name__ == "__main__":
     main()

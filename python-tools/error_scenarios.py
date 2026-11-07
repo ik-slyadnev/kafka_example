@@ -16,17 +16,20 @@ def test_connection_error():
     try:
         producer = KafkaProducer(
             bootstrap_servers=['non-existent-host:9092'],
+            api_version_auto_timeout_ms=1000,
             value_serializer=lambda x: json.dumps(x).encode('utf-8')
         )
     except errors.KafkaError as e:
         logger.error(f"Ожидаемая ошибка подключения: {e}")
         return True
+    producer.close()
     return False
 
 def test_topic_not_exists(topic):
     """Тестирование отправки в несуществующий топик"""
     producer = KafkaProducer(
         bootstrap_servers=['kafka:9092'],
+        max_block_ms=3000,
         value_serializer=lambda x: json.dumps(x).encode('utf-8')
     )
     
@@ -44,6 +47,7 @@ def test_serialization_error(topic):
     """Тестирование ошибки сериализации"""
     producer = KafkaProducer(
         bootstrap_servers=['kafka:9092'],
+        max_block_ms=3000,
         value_serializer=lambda x: json.dumps(x).encode('utf-8')
     )
     
@@ -85,6 +89,8 @@ def main():
     parser.add_argument('--topic', help='Имя топика для тестирования')
     
     args = parser.parse_args()
+    if args.scenario in ("topic", "serialization") and not args.topic:
+        parser.error("--topic обязателен для этого сценария")
     
     def signal_handler(signum, frame):
         logger.info("Получен сигнал остановки, завершение работы...")
@@ -103,6 +109,8 @@ def main():
     if args.scenario in scenarios:
         success = scenarios[args.scenario]()
         logger.info(f"Тест сценария {args.scenario}: {'успешно' if success else 'неуспешно'}")
+        if not success:
+            sys.exit(1)
     else:
         logger.error(f"Неизвестный сценарий: {args.scenario}")
 

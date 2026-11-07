@@ -7,11 +7,11 @@
 
 import argparse
 import json
-import os
 import random
 import subprocess
+import shlex
+import tempfile
 import time
-from datetime import datetime
 
 # Список доступных сценариев
 SCENARIOS = [
@@ -23,13 +23,11 @@ SCENARIOS = [
     "rebalancing"
 ]
 
-def run_command(command, wait=True):
-    """Запускает команду в терминале."""
-    print(f"Выполнение команды: {command}")
-    process = subprocess.Popen(command, shell=True)
-    if wait:
-        process.wait()
-    return process
+def run_command(command):
+    """Ошибка дочерней команды прерывает сценарий, ожидание ограничено."""
+    print(f"Выполнение команды: {command}", flush=True)
+    return subprocess.run(shlex.split(command), check=True, timeout=120)
+
 
 def basic_producer_consumer():
     """
@@ -70,7 +68,7 @@ def multiple_partitions():
     
     # Читаем сообщения
     print("\nЧтение сообщений из топика...")
-    run_command(f"python consumer.py --topic {topic_name} --from-beginning")
+    run_command(f"python consumer.py --topic {topic_name} --from-beginning --limit 9")
     
     print("\nСценарий завершен. Топик можно удалить командой:")
     print(f"python topic_manager.py --delete {topic_name}")
@@ -85,10 +83,6 @@ def consumer_groups():
     topic_name = f"group-topic-{random.randint(1000, 9999)}"
     run_command(f"python topic_manager.py --create {topic_name} --partitions 3")
     
-    # Отправляем сообщения
-    print("\nОтправка сообщений в топик...")
-    run_command(f"python producer.py --topic {topic_name} --count 10 --interval 0.5")
-    
     # Запускаем несколько консьюмеров в одной группе
     print("\nЗапуск нескольких консьюмеров в одной группе...")
     print("Откройте 3 разных терминала и выполните в них следующие команды:")
@@ -98,6 +92,8 @@ def consumer_groups():
     print(f"Терминал 2: docker exec -it python-tools python consumer.py --topic {topic_name} --group {group_id} --from-beginning")
     print(f"Терминал 3: docker exec -it python-tools python consumer.py --topic {topic_name} --group {group_id} --from-beginning")
     
+    print("\nПосле запуска всех трёх консьюмеров отправьте сообщения в четвёртом терминале:")
+    print(f"docker exec -it python-tools python producer.py --topic {topic_name} --count 10 --interval 0.5")
     print("\nОбратите внимание, как сообщения распределяются между консьюмерами в группе.")
     print("После тестирования нажмите Ctrl+C в каждом терминале для остановки консьюмеров.")
     
@@ -120,7 +116,7 @@ def avro_schema():
     
     # Читаем сообщения с использованием Avro-консьюмера
     print("\nЧтение сообщений с использованием Avro-консьюмера...")
-    run_command(f"python avro_consumer.py --topic {topic_name} --from-beginning")
+    run_command(f"python avro_consumer.py --topic {topic_name} --from-beginning --limit 4")
     
     print("\nСценарий завершен. Топик можно удалить командой:")
     print(f"python topic_manager.py --delete {topic_name}")
@@ -131,24 +127,22 @@ def error_handling():
     """
     print("=== Сценарий: Обработка ошибок ===")
     
-    # Попытка чтения из несуществующего топика
-    print("\nПопытка чтения из несуществующего топика...")
-    run_command("python consumer.py --topic non-existent-topic --from-beginning --limit 1")
-    
-    # Попытка отправки сообщения в несуществующий топик (с автосозданием)
-    print("\nПопытка отправки сообщения в несуществующий топик (с автосозданием)...")
-    run_command("python producer.py --topic auto-created-topic --message 'Тестовое сообщение'")
-    
-    # Попытка использования неверной схемы Avro
-    print("\nПопытка использования неверной схемы Avro...")
-    # Создаем временный файл с неверной схемой
-    with open("temp_invalid_schema.avsc", "w") as f:
-        f.write('{"type": "record", "name": "Invalid", "fields": [{"name": "field1"}]}')  # Отсутствует тип поля
-    
-    run_command("python avro_producer.py --topic invalid-schema-topic --schema temp_invalid_schema.avsc")
-    
-    # Удаляем временный файл
-    os.remove("temp_invalid_schema.avsc")
+    topic = f"serialization-{random.randint(1000, 9999)}"
+    run_command(f"python topic_manager.py --create {topic} --partitions 1")
+    try:
+        for scenario in ('connection', 'topic', 'serialization', 'timeout'):
+            selected_topic = topic if scenario == 'serialization' else f"missing-{random.randint(1000, 9999)}"
+            run_command(f"python error_scenarios.py --scenario {scenario} --topic {selected_topic}")
+    finally:
+        run_command(f"python topic_manager.py --delete {topic}")
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.avsc') as schema:
+        schema.write('{"type": "record", "name": "Invalid", "fields": [{"name": "field1"}]}')
+        schema.flush()
+        result = subprocess.run(['python', 'avro_producer.py', '--topic', 'invalid-schema-topic',
+                                 '--schema', schema.name], timeout=30)
+        if result.returncode == 0:
+            raise RuntimeError("Неверная схема неожиданно принята")
     
     print("\nСценарий завершен.")
 
@@ -162,22 +156,24 @@ def rebalancing():
     topic_name = f"rebalance-topic-{random.randint(1000, 9999)}"
     run_command(f"python topic_manager.py --create {topic_name} --partitions 4")
     
-    # Отправляем сообщения
-    print("\nОтправка сообщений в топик...")
-    run_command(f"python producer.py --topic {topic_name} --count 20 --interval 0.2")
-    
     # Инструкции по запуску консьюмеров для наблюдения ребалансировки
     print("\nДля наблюдения процесса ребалансировки выполните следующие шаги:")
     group_id = f"rebalance-group-{random.randint(1000, 9999)}"
     
     print(f"\n1. Откройте первый терминал и запустите консьюмер:")
     print(f"   docker exec -it python-tools python consumer.py --topic {topic_name} --group {group_id} --from-beginning")
+    print("В отдельном терминале отправьте новую порцию сообщений:")
+    print(f"docker exec -it python-tools python producer.py --topic {topic_name} --count 20 --interval 0.2")
     
     print(f"\n2. Через 5-10 секунд откройте второй терминал и запустите еще один консьюмер в той же группе:")
     print(f"   docker exec -it python-tools python consumer.py --topic {topic_name} --group {group_id} --from-beginning")
+    print("В отдельном терминале отправьте новую порцию сообщений:")
+    print(f"docker exec -it python-tools python producer.py --topic {topic_name} --count 20 --interval 0.2")
     
     print(f"\n3. Через 5-10 секунд откройте третий терминал и запустите третий консьюмер:")
     print(f"   docker exec -it python-tools python consumer.py --topic {topic_name} --group {group_id} --from-beginning")
+    print("В отдельном терминале отправьте новую порцию сообщений:")
+    print(f"docker exec -it python-tools python producer.py --topic {topic_name} --count 20 --interval 0.2")
     
     print(f"\n4. Наблюдайте за распределением партиций между консьюмерами.")
     

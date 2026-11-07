@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from kafka import KafkaConsumer, KafkaProducer, TopicPartition
 import json
+from consumer import deserialize_value
 import time
 import logging
 from argparse import ArgumentParser
@@ -26,7 +27,7 @@ def create_consumer(topic, group_id=None, offset='earliest'):
         group_id=group_id,
         auto_offset_reset=offset,
         enable_auto_commit=True,
-        value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+        value_deserializer=deserialize_value
     )
 
 def send_test_messages(topic, count=10):
@@ -34,54 +35,52 @@ def send_test_messages(topic, count=10):
     producer = create_producer()
     messages_sent = []
     
-    for i in range(count):
-        message = {
-            "message_id": i,
-            "content": f"Test message {i}",
-            "timestamp": time.time()
-        }
-        future = producer.send(topic, value=message)
-        record_metadata = future.get(timeout=10)
-        messages_sent.append({
-            "message": message,
-            "partition": record_metadata.partition,
-            "offset": record_metadata.offset
-        })
-        logger.info(f"Отправлено сообщение {i} в партицию {record_metadata.partition}, смещение {record_metadata.offset}")
+    try:
+        for i in range(count):
+            message = {
+                "message_id": i,
+                "content": f"Test message {i}",
+                "timestamp": time.time()
+            }
+            future = producer.send(topic, value=message)
+            record_metadata = future.get(timeout=10)
+            messages_sent.append({
+                "message": message,
+                "partition": record_metadata.partition,
+                "offset": record_metadata.offset
+            })
+            logger.info(f"Отправлено сообщение {i} в партицию {record_metadata.partition}, смещение {record_metadata.offset}")
     
-    producer.flush()
-    producer.close()
+        producer.flush()
+    finally:
+        producer.close()
     return messages_sent
 
 def test_offset_recovery(topic, group_id, specific_offset=None):
     """Тестирование восстановления с определенного смещения"""
-    if specific_offset is None:
-        consumer = create_consumer(topic, group_id)
-    else:
-        # Для чтения с конкретного смещения назначаем партиции вручную (без подписки на топик)
-        consumer = KafkaConsumer(
-            bootstrap_servers=['kafka:9092'],
-            group_id=group_id,
-            enable_auto_commit=True,
-            value_deserializer=lambda x: json.loads(x.decode('utf-8'))
-        )
-        tps = [TopicPartition(topic, p) for p in sorted(consumer.partitions_for_topic(topic) or [])]
-        consumer.assign(tps)
-        for tp in tps:
-            consumer.seek(tp, specific_offset)
-
-    where = f"смещения {specific_offset}" if specific_offset is not None else "начала"
-    logger.info(f"Начало чтения с {where}. Для остановки нажми Ctrl+C")
-    
+    consumer = create_consumer(topic, group_id) if specific_offset is None else KafkaConsumer(
+        bootstrap_servers=['kafka:9092'], group_id=group_id,
+        enable_auto_commit=True, auto_offset_reset='none', value_deserializer=deserialize_value
+    )
     try:
+        if specific_offset is not None:
+            tps = [TopicPartition(topic, p) for p in sorted(consumer.partitions_for_topic(topic) or [])]
+            if not tps:
+                raise ValueError(f"Топик {topic} не найден")
+            consumer.assign(tps)
+            for tp in tps:
+                consumer.seek(tp, specific_offset)
+        where = f"смещения {specific_offset}" if specific_offset is not None else "сохранённого смещения группы (или начала для новой группы)"
+        logger.info(f"Начало чтения с {where}. Для остановки нажми Ctrl+C")
         for message in consumer:
             logger.info(f"Получено сообщение: топик={message.topic}, "
-                       f"партиция={message.partition}, смещение={message.offset}, "
-                       f"значение={message.value}")
+                        f"партиция={message.partition}, смещение={message.offset}, "
+                        f"значение={message.value}")
     except KeyboardInterrupt:
         pass
     finally:
         consumer.close()
+
 
 def main():
     parser = ArgumentParser(description='Тестирование восстановления данных Kafka')
@@ -94,6 +93,8 @@ def main():
     parser.add_argument('--offset', type=int, help='Конкретное смещение для восстановления')
     
     args = parser.parse_args()
+    if args.messages <= 0 or (args.offset is not None and args.offset < 0):
+        parser.error("--messages должен быть больше нуля, --offset неотрицательным")
     
     def signal_handler(signum, frame):
         logger.info("Получен сигнал остановки, завершение работы...")

@@ -28,7 +28,7 @@ def create_avro_consumer(topic, group_id=None, from_beginning=False):
     
     avro_deserializer = AvroDeserializer(
         schema_registry_client,
-        lambda x, ctx: x
+        from_dict=lambda x, ctx: x
     )
     
     consumer_config = {
@@ -62,8 +62,11 @@ def main():
     parser.add_argument('--limit', type=int, help='Максимальное количество сообщений для чтения')
     
     args = parser.parse_args()
+    if args.limit is not None and args.limit <= 0:
+        parser.error("--limit должен быть больше нуля")
     
     signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     
     print(f"Запуск Avro консьюмера для топика: {args.topic}")
     if args.group:

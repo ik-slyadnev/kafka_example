@@ -19,6 +19,16 @@ def signal_handler(sig, frame):
     print("\nЗавершение работы консьюмера...")
     running = False
 
+def deserialize_value(value):
+    if value is None:
+        return None
+    text = value.decode('utf-8')
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text
+
+
 def create_consumer(topic, group_id=None, from_beginning=False):
     """Создает и возвращает экземпляр KafkaConsumer."""
     auto_offset_reset = 'earliest' if from_beginning else 'latest'
@@ -30,7 +40,7 @@ def create_consumer(topic, group_id=None, from_beginning=False):
         enable_auto_commit=True,
         group_id=group_id,
         consumer_timeout_ms=1000,  # раз в секунду выходим из ожидания, чтобы Ctrl+C срабатывал сразу
-        value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+        value_deserializer=deserialize_value,
         key_deserializer=lambda x: x.decode('utf-8') if x else None
     )
     
@@ -53,8 +63,11 @@ def main():
     parser.add_argument('--limit', type=int, help='Максимальное количество сообщений для чтения')
     
     args = parser.parse_args()
+    if args.limit is not None and args.limit <= 0:
+        parser.error("--limit должен быть больше нуля")
     
     signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     
     print(f"Запуск консьюмера для топика: {args.topic}")
     if args.group:
